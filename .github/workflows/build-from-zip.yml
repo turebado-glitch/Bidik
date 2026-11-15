@@ -26,9 +26,18 @@ jobs:
 
       - name: Extract ZIP
         run: |
-          unzip -o skysight-ar.zip -d extracted_app
-          cp -r extracted_app/. .
-          rm -rf extracted_app
+          ZIP_FILE=$(ls -t *.zip 2>/dev/null | head -n 1 || true)
+          if [ -n "$ZIP_FILE" ]; then
+            echo "Mengekstrak $ZIP_FILE ..."
+            unzip -o "$ZIP_FILE" -d extracted_app
+            cp -r extracted_app/. .
+            rm -rf extracted_app
+          elif [ -f "package.json" ]; then
+            echo "Memakai kode proyek yang sudah ada di repositori."
+          else
+            echo "File .zip atau package.json tidak ditemukan."
+            exit 1
+          fi
 
       - name: Build Web & Android
         run: |
