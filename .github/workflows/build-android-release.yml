@@ -1,14 +1,17 @@
-name: Build Android Release (APK & AAB)
+name: Build Bidik Android (APK & AAB)
 
 on:
   workflow_dispatch:
     inputs:
       publish_release:
-        description: 'Terbitkan ke halaman GitHub Releases agar APK/AAB mudah diunduh langsung dari HP'
+        description: 'Terbitkan APK & AAB ke GitHub Releases'
         required: true
         type: boolean
         default: true
   push:
+    branches:
+      - main
+      - master
     tags:
       - 'v*'
 
@@ -24,11 +27,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Ekstrak file ZIP jika tersedia
+        run: |
+          ZIP_FILE=$(ls -t *.zip 2>/dev/null | head -n 1 || true)
+          if [ -n "$ZIP_FILE" ]; then
+            echo "Mengekstrak $ZIP_FILE..."
+            unzip -oq "$ZIP_FILE" -d _extracted
+            shopt -s dotglob
+            cp -rf _extracted/* .
+            rm -rf _extracted
+          else
+            echo "Tidak ada file .zip di root, memakai kode sumber langsung."
+          fi
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
 
       - name: Setup Java 21
         uses: actions/setup-java@v4
@@ -38,7 +53,7 @@ jobs:
 
       - name: Install dependencies & build web bundle
         run: |
-          npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          npm install --legacy-peer-deps
           npm run build
 
       - name: Generate Capacitor Android project
@@ -59,7 +74,6 @@ jobs:
             echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > "$KEYSTORE_FILE"
             echo "keystore_path=$KEYSTORE_FILE" >> $GITHUB_OUTPUT
             echo "generated=false" >> $GITHUB_OUTPUT
-            echo "Menggunakan Keystore resmi dari GitHub Secrets."
           else
             keytool -genkeypair -v \
               -keystore "$KEYSTORE_FILE" \
@@ -72,10 +86,9 @@ jobs:
               -dname "CN=Ahmad Azizi, OU=Bidik, O=Al-Muqri, L=Prenduan Sumenep, ST=Jawa Timur, C=ID"
             echo "keystore_path=$KEYSTORE_FILE" >> $GITHUB_OUTPUT
             echo "generated=true" >> $GITHUB_OUTPUT
-            echo "PERINGATAN: Keystore dibuat otomatis untuk build ini. Unduh artifact keystore jika ingin memakai kunci yang sama untuk update Play Store."
           fi
 
-      - name: Accept Android SDK licenses & Build Release APK & AAB
+      - name: Build Release APK & AAB
         working-directory: android
         run: |
           if [ -n "$ANDROID_HOME" ] && [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
@@ -89,7 +102,7 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'bidik-release' }}
           ANDROID_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'bidik123456' }}
 
-      - name: Prepare release output filenames
+      - name: Siapkan nama file rilis
         run: |
           mkdir -p release-outputs
           cp android/app/build/outputs/apk/release/app-release.apk release-outputs/Bidik-v1.0-release.apk
@@ -115,7 +128,7 @@ jobs:
           path: android/app/release-keystore.jks
 
       - name: Publish to GitHub Releases
-        if: startsWith(github.ref, 'refs/tags/v') || inputs.publish_release == true
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'push' || inputs.publish_release == true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -127,4 +140,4 @@ jobs:
             release-outputs/Bidik-v1.0-release.apk \
             release-outputs/Bidik-v1.0-release.aab \
             --title "Bidik $TAG_NAME" \
-            --notes "Build rilis otomatis APK & AAB untuk aplikasi Bidik (Ahmad Azizi Â· Al-Muqri, Prenduan, Sumenep)."
+            --notes "Build rilis otomatis APK & AAB aplikasi Bidik (Ahmad Azizi · Al-Muqri Prenduan)."
