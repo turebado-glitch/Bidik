@@ -37,7 +37,7 @@ jobs:
 
       - name: Install dependencies & build web bundle
         run: |
-          npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          npm install --legacy-peer-deps
           npm run build
 
       - name: Generate Capacitor Android project
