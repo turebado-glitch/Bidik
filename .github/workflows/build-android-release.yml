@@ -1,0 +1,130 @@
+name: Build Android Release (APK & AAB)
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Terbitkan ke halaman GitHub Releases agar APK/AAB mudah diunduh langsung dari HP'
+        required: true
+        type: boolean
+        default: true
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    name: Build Signed APK & AAB
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install dependencies & build web bundle
+        run: |
+          npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          npm run build
+
+      - name: Generate Capacitor Android project
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+          node scripts/configure-android.mjs
+        env:
+          ANDROID_VERSION_CODE: ${{ github.run_number }}
+
+      - name: Prepare release signing keystore
+        id: keystore
+        run: |
+          KEYSTORE_FILE="${{ github.workspace }}/android/app/release-keystore.jks"
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > "$KEYSTORE_FILE"
+            echo "keystore_path=$KEYSTORE_FILE" >> $GITHUB_OUTPUT
+            echo "generated=false" >> $GITHUB_OUTPUT
+            echo "Menggunakan Keystore resmi dari GitHub Secrets."
+          else
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE_FILE" \
+              -alias "bidik-release" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass "bidik123456" \
+              -keypass "bidik123456" \
+              -dname "CN=Ahmad Azizi, OU=Bidik, O=Al-Muqri, L=Prenduan Sumenep, ST=Jawa Timur, C=ID"
+            echo "keystore_path=$KEYSTORE_FILE" >> $GITHUB_OUTPUT
+            echo "generated=true" >> $GITHUB_OUTPUT
+            echo "PERINGATAN: Keystore dibuat otomatis untuk build ini. Unduh artifact keystore jika ingin memakai kunci yang sama untuk update Play Store."
+          fi
+
+      - name: Accept Android SDK licenses & Build Release APK & AAB
+        working-directory: android
+        run: |
+          if [ -n "$ANDROID_HOME" ] && [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+          fi
+          chmod +x gradlew
+          ./gradlew assembleRelease bundleRelease --no-daemon
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ steps.keystore.outputs.keystore_path }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || 'bidik123456' }}
+          ANDROID_KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'bidik-release' }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'bidik123456' }}
+
+      - name: Prepare release output filenames
+        run: |
+          mkdir -p release-outputs
+          cp android/app/build/outputs/apk/release/app-release.apk release-outputs/Bidik-v1.0-release.apk
+          cp android/app/build/outputs/bundle/release/app-release.aab release-outputs/Bidik-v1.0-release.aab
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bidik-Release-APK
+          path: release-outputs/Bidik-v1.0-release.apk
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bidik-Release-AAB
+          path: release-outputs/Bidik-v1.0-release.aab
+
+      - name: Upload auto-generated keystore backup
+        if: steps.keystore.outputs.generated == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bidik-Keystore-Backup
+          path: android/app/release-keystore.jks
+
+      - name: Publish to GitHub Releases
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.publish_release == true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="v1.0-build-${{ github.run_number }}"
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG_NAME="${GITHUB_REF_NAME}"
+          fi
+          gh release create "$TAG_NAME" \
+            release-outputs/Bidik-v1.0-release.apk \
+            release-outputs/Bidik-v1.0-release.aab \
+            --title "Bidik $TAG_NAME" \
+            --notes "Build rilis otomatis APK & AAB untuk aplikasi Bidik (Ahmad Azizi - Al-Muqri, Prenduan, Sumenep)."
