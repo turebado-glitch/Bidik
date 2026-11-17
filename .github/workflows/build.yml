@@ -127,4 +127,4 @@ jobs:
             release-outputs/Bidik-v1.0-release.apk \
             release-outputs/Bidik-v1.0-release.aab \
             --title "Bidik $TAG_NAME" \
-            --notes "Build rilis otomatis APK & AAB untuk aplikasi Bidik (Ahmad Azizi - Al-Muqri, Prenduan, Sumenep)."
+            --notes "Build rilis otomatis APK & AAB untuk aplikasi Bidik (Ahmad Azizi · Al-Muqri, Prenduan, Sumenep)."
